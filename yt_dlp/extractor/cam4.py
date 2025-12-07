@@ -1,4 +1,5 @@
 from .common import InfoExtractor
+from ..networking.exceptions import HTTPError
 from ..utils import ExtractorError
 
 
@@ -46,7 +47,21 @@ class CAM4IE(InfoExtractor):
             raise ExtractorError(
                 f'{channel_id}: Stream info found but no playlist URL available', expected=True)
 
-        formats = self._extract_m3u8_formats(m3u8_playlist, channel_id, 'mp4', m3u8_id='hls', live=True)
+        # Try to extract formats, catch CDN access denied errors
+        try:
+            formats = self._extract_m3u8_formats(m3u8_playlist, channel_id, 'mp4', m3u8_id='hls', live=True)
+        except ExtractorError as e:
+            # CDN returns "not allowed to view" for private shows or away status
+            if 'not allowed to view' in str(e).lower() or 'session is not allowed' in str(e).lower():
+                raise ExtractorError(
+                    f'{channel_id}: Stream not accessible - performer may be in a private show or away',
+                    expected=True)
+            raise
+
+        if not formats:
+            raise ExtractorError(
+                f'{channel_id}: Stream not accessible - performer may be in a private show or away',
+                expected=True)
 
         return {
             'id': channel_id,
