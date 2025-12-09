@@ -51,8 +51,13 @@ class CAM4IE(InfoExtractor):
         try:
             formats = self._extract_m3u8_formats(m3u8_playlist, channel_id, 'mp4', m3u8_id='hls', live=True)
         except ExtractorError as e:
+            error_str = str(e).lower()
             # CDN returns "not allowed to view" for private shows or away status
-            if 'not allowed to view' in str(e).lower() or 'session is not allowed' in str(e).lower():
+            # Also may return HTTP 400/403 errors
+            if any(x in error_str for x in (
+                'not allowed to view', 'session is not allowed',
+                '400', '403', 'bad request', 'forbidden'
+            )):
                 raise ExtractorError(
                     f'{channel_id}: Stream not accessible - performer may be in a private show or away',
                     expected=True)
