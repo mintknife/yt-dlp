@@ -3,7 +3,7 @@
 CAM4 Standalone Stream Recorder
 
 A lightweight standalone script to check CAM4 performer status and record streams.
-No yt-dlp dependency required - only uses requests and ffmpeg.
+No yt-dlp dependency required - uses curl_cffi (preferred) or requests, plus ffmpeg.
 
 Usage:
     python cam4_standalone.py <url> [output_file]
@@ -11,6 +11,11 @@ Usage:
 Examples:
     python cam4_standalone.py https://www.cam4.com/performer
     python cam4_standalone.py https://www.cam4.com/performer output.ts
+
+Dependencies:
+    - curl_cffi (recommended): pip install curl_cffi
+    - requests (fallback): pip install requests
+    - ffmpeg (for recording)
 """
 
 import re
@@ -24,11 +29,23 @@ from typing import Optional, Tuple
 from dataclasses import dataclass
 from enum import Enum
 
+# Try to use curl_cffi for browser impersonation (like yt-dlp)
+# Falls back to requests if not available
+USING_CURL_CFFI = False
+try:
+    from curl_cffi import requests as curl_requests
+    USING_CURL_CFFI = True
+except ImportError:
+    curl_requests = None
+
 try:
     import requests
 except ImportError:
-    print("ERROR: requests library required. Install with: pip install requests")
-    sys.exit(1)
+    if not USING_CURL_CFFI:
+        print("ERROR: Either curl_cffi or requests library required.")
+        print("Install with: pip install curl_cffi  (recommended)")
+        print("         or: pip install requests")
+        sys.exit(1)
 
 
 class PerformerStatus(Enum):
@@ -63,19 +80,29 @@ class CAM4Standalone:
     Standalone CAM4 stream checker and recorder.
     
     Replicates the functionality of the yt-dlp CAM4 extractor without
-    requiring yt-dlp as a dependency.
+    requiring yt-dlp as a dependency. Uses curl_cffi for browser
+    impersonation when available (bypasses anti-bot protections).
     """
     
     VALID_URL_PATTERN = r'https?://(?:[^/]+\.)?cam4\.com/(?P<id>[a-z0-9_]+)'
     BASE_API_URL = "https://www.cam4.com/rest/v1.0/profile"
     THUMBNAIL_BASE_URL = "https://snapshots.xcdnpro.com/thumbnails"
     
-    def __init__(self, verbose: bool = False):
+    def __init__(self, verbose: bool = False, impersonate: str = "chrome"):
         self.verbose = verbose
-        self.session = requests.Session()
-        self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        })
+        self.impersonate = impersonate
+        self._using_curl_cffi = USING_CURL_CFFI
+        
+        # Create session with browser impersonation if available
+        if USING_CURL_CFFI:
+            self.session = curl_requests.Session(impersonate=impersonate)
+            self._log(f"Using curl_cffi with {impersonate} impersonation")
+        else:
+            self.session = requests.Session()
+            self.session.headers.update({
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            })
+            self._log("Using requests (no impersonation - install curl_cffi for better compatibility)")
     
     def _log(self, message: str):
         """Print message if verbose mode is enabled"""
@@ -108,9 +135,9 @@ class CAM4Standalone:
                 return None
             response.raise_for_status()
             return response.json()
-        except requests.exceptions.JSONDecodeError:
+        except json.JSONDecodeError:
             return None
-        except requests.exceptions.RequestException as e:
+        except Exception as e:
             self._log(f"Error fetching profile: {e}")
             return None
     
@@ -134,9 +161,9 @@ class CAM4Standalone:
             response.raise_for_status()
             data = response.json()
             return data if data else None
-        except requests.exceptions.JSONDecodeError:
+        except json.JSONDecodeError:
             return None
-        except requests.exceptions.RequestException as e:
+        except Exception as e:
             self._log(f"Error fetching stream info: {e}")
             return None
     
@@ -166,7 +193,7 @@ class CAM4Standalone:
             
             return False, "Invalid stream response"
             
-        except requests.exceptions.RequestException as e:
+        except Exception as e:
             return False, f"Error accessing stream: {e}"
     
     def check_performer(self, url: str) -> PerformerInfo:
