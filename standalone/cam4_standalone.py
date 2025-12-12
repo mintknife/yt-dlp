@@ -134,6 +134,10 @@ class CAM4Standalone:
     1. curl_cffi (browser impersonation)
     2. FlareSolverr (real browser proxy)
     3. requests (plain HTTP)
+    
+    Authentication:
+    - Pass cookies_file for Netscape format cookie file (exported from browser)
+    - Pass cookies dict for direct cookie values
     """
     
     VALID_URL_PATTERN = r'https?://(?:[^/]+\.)?cam4\.com/(?P<id>[a-z0-9_]+)'
@@ -145,7 +149,9 @@ class CAM4Standalone:
         verbose: bool = False, 
         impersonate: str = "chrome",
         flaresolverr_url: Optional[str] = None,
-        use_flaresolverr: bool = False
+        use_flaresolverr: bool = False,
+        cookies_file: Optional[str] = None,
+        cookies: Optional[dict] = None
     ):
         self.verbose = verbose
         self._flaresolverr = None
@@ -164,6 +170,43 @@ class CAM4Standalone:
             self.session.headers.update({
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
             })
+        
+        # Load cookies from file (Netscape format)
+        if cookies_file:
+            self._load_cookies_from_file(cookies_file)
+        
+        # Set cookies from dict
+        if cookies:
+            for name, value in cookies.items():
+                self.session.cookies.set(name, value, domain='.cam4.com')
+    
+    def _load_cookies_from_file(self, filepath: str):
+        """
+        Load cookies from a Netscape format cookie file.
+        This format is used by browser extensions like "Get cookies.txt" or "cookies.txt".
+        """
+        try:
+            with open(filepath, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    # Skip comments and empty lines
+                    if not line or line.startswith('#'):
+                        continue
+                    
+                    parts = line.split('\t')
+                    if len(parts) >= 7:
+                        domain, _, path, secure, expires, name, value = parts[:7]
+                        # Only load cam4.com cookies
+                        if 'cam4.com' in domain:
+                            self.session.cookies.set(
+                                name, value, 
+                                domain=domain,
+                                path=path,
+                                secure=(secure.upper() == 'TRUE')
+                            )
+            self._log(f"Loaded cookies from {filepath}")
+        except Exception as e:
+            self._log(f"Error loading cookies from {filepath}: {e}")
     
     def _log(self, message: str):
         if self.verbose:
